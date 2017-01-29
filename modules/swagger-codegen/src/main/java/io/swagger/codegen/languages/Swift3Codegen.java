@@ -1,5 +1,9 @@
 package io.swagger.codegen.languages;
 
+import com.google.common.base.CaseFormat;
+import com.samskivert.mustache.Mustache;
+import com.samskivert.mustache.Template;
+
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
@@ -18,6 +22,9 @@ import org.apache.commons.lang3.text.WordUtils;
 
 import javax.annotation.Nullable;
 import java.io.File;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.io.Writer;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -216,6 +223,13 @@ public class Swift3Codegen extends DefaultCodegen implements CodegenConfig {
             additionalProperties.put(POD_AUTHORS, DEFAULT_POD_AUTHORS);
         }
 
+        additionalProperties.put("fnUpperCase", new UpperCaseLambda());
+        additionalProperties.put("fnLowerCase", new LowerCaseLambda());
+        additionalProperties.put("fnCapitalize", new CapitalizeLambda());
+        additionalProperties.put("fnCamelize", new CamelizeLambda(false));
+        additionalProperties.put("fnCamelizeFirst", new CamelizeLambda(true));
+        additionalProperties.put("fnEnumEntry", new EnumEntryLambda());
+
         supportingFiles.add(new SupportingFile("Podspec.mustache", "", projectName + ".podspec"));
         supportingFiles.add(new SupportingFile("Cartfile.mustache", "", "Cartfile"));
         supportingFiles.add(new SupportingFile("APIHelper.mustache", sourceFolder, "APIHelper.swift"));
@@ -235,13 +249,13 @@ public class Swift3Codegen extends DefaultCodegen implements CodegenConfig {
     }
 
     @Override
-    public String escapeReservedWord(String name) {           
+    public String escapeReservedWord(String name) {
         if(this.reservedWordsMappings().containsKey(name)) {
             return this.reservedWordsMappings().get(name);
         }
         return "_" + name;  // add an underscore to the name
     }
-    
+
     @Override
     public String modelFileFolder() {
         return outputFolder + File.separator + sourceFolder + modelPackage().replace('.', File.separatorChar);
@@ -636,5 +650,83 @@ public class Swift3Codegen extends DefaultCodegen implements CodegenConfig {
 
 
         return codegenModel;
+    }
+
+    private static abstract class CustomLambda implements Mustache.Lambda {
+        @Override
+        public void execute(Template.Fragment frag, Writer out) throws IOException {
+            final StringWriter tempWriter = new StringWriter();
+            frag.execute(tempWriter);
+            out.write(formatFragment(tempWriter.toString()));
+        }
+
+        public abstract String formatFragment(String fragment);
+    }
+
+
+    private static class JavadocLambda extends CustomLambda {
+        @Override
+        public String formatFragment(String fragment) {
+            final String[] lines = fragment.split("\\r?\\n");
+            final StringBuilder sb = new StringBuilder();
+            sb.append("  /**\n");
+            for (String line : lines) {
+                sb.append("   * ").append(line).append("\n");
+            }
+            sb.append("   */\n");
+            return sb.toString();
+        }
+    }
+
+    private static class LowerCaseLambda extends CustomLambda {
+        @Override
+        public String formatFragment(String fragment) {
+            return StringUtils.lowerCase(fragment);
+        }
+    }
+
+    private static class UpperCaseLambda extends CustomLambda {
+        @Override
+        public String formatFragment(String fragment) {
+            return StringUtils.upperCase(fragment);
+        }
+    }
+
+    private static class CapitalizeLambda extends CustomLambda {
+        @Override
+        public String formatFragment(String fragment) {
+            return StringUtils.capitalize(fragment);
+        }
+    }
+
+    private static class CamelizeLambda extends CustomLambda {
+        private final boolean capitalizeFirst;
+
+        public CamelizeLambda(boolean capitalizeFirst) {
+            this.capitalizeFirst = capitalizeFirst;
+        }
+
+        @Override
+        public String formatFragment(String fragment) {
+            return camelize(fragment, !capitalizeFirst);
+        }
+    }
+
+    private class EnumEntryLambda extends CustomLambda {
+        @Override
+        public String formatFragment(String fragment) {
+            return formatIdentifier(fragment, true);
+        }
+    }
+
+    private String formatIdentifier(String name, boolean capitalized) {
+        String identifier = camelize(name, true);
+        if (capitalized) {
+            identifier = StringUtils.capitalize(identifier);
+        }
+        if (identifier.matches("[a-zA-Z_$][\\w_$]+") && !isReservedWord(identifier)) {
+            return identifier;
+        }
+        return escapeReservedWord(identifier);
     }
 }
